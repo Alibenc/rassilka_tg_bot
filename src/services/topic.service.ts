@@ -159,11 +159,18 @@ export async function getAllTopics() {
         );
 }
 
-export async function getTopicsByName(name: string) {
+export async function getTopicsByName(
+    botId: number,
+    name: string,
+) {
     return db
         .select({
-            threadId: topics.telegramThreadId,
-            chatId: supergroups.telegramChatId,
+            id: topics.id,
+            telegramThreadId: topics.telegramThreadId,
+            name: topics.name,
+            isClosed: topics.isClosed,
+            supergroupId: topics.supergroupId,
+            telegramChatId: supergroups.telegramChatId,
         })
         .from(topics)
         .innerJoin(
@@ -172,14 +179,16 @@ export async function getTopicsByName(name: string) {
         )
         .where(
             and(
-                eq(topics.name, name),
+                eq(supergroups.botId, botId),
                 eq(supergroups.isActive, true),
+                eq(topics.isClosed, false),
+                eq(topics.name, name),
             ),
         );
 }
 
-export async function getTopicNames() {
-    return db
+export async function getTopicNames(botId: number) {
+    const result = await db
         .selectDistinct({
             name: topics.name,
         })
@@ -188,6 +197,12 @@ export async function getTopicNames() {
             supergroups,
             eq(topics.supergroupId, supergroups.id),
         )
-        .where(eq(supergroups.isActive, true))
-        .orderBy(asc(topics.name));
+        .where(
+            and(
+                eq(supergroups.botId, botId),
+                eq(supergroups.isActive, true),
+            ),
+        );
+
+    return result.map((topic) => topic.name);
 }

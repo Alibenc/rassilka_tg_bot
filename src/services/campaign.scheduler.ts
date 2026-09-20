@@ -44,6 +44,7 @@ async function processCampaign(
         );
 
         await sendToTopic(
+            campaign.botId,
             campaign.topicName,
             post,
         );

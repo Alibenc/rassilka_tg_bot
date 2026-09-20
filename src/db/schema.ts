@@ -41,6 +41,12 @@ export const users = pgTable("users", {
 export const supergroups = pgTable("supergroups", {
     id: serial("id").primaryKey(),
 
+    botId: integer("bot_id")
+        .notNull()
+        .references(() => telegramBots.id, {
+            onDelete: "cascade",
+        }),
+
     telegramChatId: bigint("telegram_chat_id", {
         mode: "bigint",
     }).notNull().unique(),
@@ -135,6 +141,12 @@ export const posts = pgTable("posts", {
 export const campaigns = pgTable("campaigns", {
     id: serial("id").primaryKey(),
 
+    botId: integer("bot_id")
+        .notNull()
+        .references(() => telegramBots.id, {
+            onDelete: "cascade",
+        }),
+
     topicName: text("topic_name").notNull(),
 
     intervalMinutes: integer("interval_minutes")
@@ -190,3 +202,35 @@ export const campaignPosts = pgTable(
         ),
     }),
 );
+
+export const telegramBots = pgTable("telegram_bots", {
+    id: serial("id").primaryKey(),
+
+    telegramBotId: bigint("telegram_bot_id", {
+        mode: "bigint",
+    })
+        .notNull()
+        .unique(),
+
+    username: text("username"),
+
+    token: text("token")
+        .notNull()
+        .unique(),
+
+    isMain: boolean("is_main")
+        .notNull()
+        .default(false),
+
+    isActive: boolean("is_active")
+        .notNull()
+        .default(true),
+
+    createdAt: timestamp("created_at")
+        .notNull()
+        .defaultNow(),
+
+    updatedAt: timestamp("updated_at")
+        .notNull()
+        .defaultNow(),
+});

@@ -1,15 +1,17 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
-import { db } from "../db/";
+import { db } from "../db/index.js";
 import { supergroups } from "../db/schema.js";
 
 interface UpsertSupergroupParams {
+    botId: number;
     telegramChatId: bigint;
     title: string;
     username?: string;
 }
 
 export async function upsertSupergroup({
+                                           botId,
                                            telegramChatId,
                                            title,
                                            username,
@@ -17,6 +19,7 @@ export async function upsertSupergroup({
     const [supergroup] = await db
         .insert(supergroups)
         .values({
+            botId,
             telegramChatId,
             title,
             username,
@@ -25,6 +28,7 @@ export async function upsertSupergroup({
         .onConflictDoUpdate({
             target: supergroups.telegramChatId,
             set: {
+                botId,
                 title,
                 username,
                 isActive: true,
@@ -37,6 +41,7 @@ export async function upsertSupergroup({
 }
 
 export async function deactivateSupergroup(
+    botId: number,
     telegramChatId: bigint,
 ) {
     await db
@@ -46,13 +51,26 @@ export async function deactivateSupergroup(
             updatedAt: new Date(),
         })
         .where(
-            eq(supergroups.telegramChatId, telegramChatId),
+            and(
+                eq(supergroups.botId, botId),
+                eq(
+                    supergroups.telegramChatId,
+                    telegramChatId,
+                ),
+            ),
         );
 }
 
-export async function getActiveSupergroups() {
+export async function getActiveSupergroups(
+    botId: number,
+) {
     return db
         .select()
         .from(supergroups)
-        .where(eq(supergroups.isActive, true));
+        .where(
+            and(
+                eq(supergroups.botId, botId),
+                eq(supergroups.isActive, true),
+            ),
+        );
 }

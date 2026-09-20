@@ -1,12 +1,28 @@
-import { bot, initBot } from "./bot/index.js";
-import { startCampaignScheduler } from "./services/campaign.scheduler.js";
+import { Bot } from "grammy";
+
+import { env } from "./config/env.js";
+import {
+    INITIAL_OWNER_IDS,
+} from "./config/auth.js";
+
 import {
     createUser,
     getUserByTelegramId,
 } from "./services/user.service.js";
+
 import {
-    INITIAL_OWNER_IDS,
-} from "./config/auth.js";
+    createBot,
+    getActiveBots,
+    getBotByTelegramId,
+} from "./services/bot.service.js";
+
+import {
+    createBotInstance,
+} from "./bot/index.js";
+
+import {
+    startCampaignScheduler,
+} from "./services/campaign.scheduler.js";
 
 async function initOwners() {
     for (const telegramId of INITIAL_OWNER_IDS) {
@@ -30,52 +46,140 @@ async function initOwners() {
     }
 }
 
-bot.command("start", async (ctx) => {
-    if (!ctx.from) {
-        return;
-    }
+async function bootstrap() {
+    /*
+     * Сначала создаём владельцев.
+     */
+    await initOwners();
 
-    const telegramId = BigInt(ctx.from.id);
+    /*
+     * Получаем информацию о главном боте
+     * по токену из .env.
+     */
+    const telegramMainBot =
+        new Bot(env.botToken);
 
-    const user =
-        await getUserByTelegramId(
-            telegramId,
+    const me =
+        await telegramMainBot.api.getMe();
+
+    /*
+     * Проверяем, зарегистрирован ли главный
+     * бот в нашей БД.
+     */
+    let mainBotRecord =
+        await getBotByTelegramId(
+            BigInt(me.id),
         );
 
+    /*
+     * Первый запуск после добавления
+     * multi-bot логики.
+     */
+    if (!mainBotRecord) {
+        mainBotRecord =
+            await createBot({
+                telegramBotId:
+                    BigInt(me.id),
 
-    console.log(user);
+                username:
+                me.username,
 
-    if (!user) {
-        await ctx.reply(
-            "У тебя нет доступа к боту.",
+                token:
+                env.botToken,
+
+                isMain: true,
+            });
+
+        console.log(
+            `Main bot registered: @${me.username}`,
         );
-
-        return;
     }
 
-    await ctx.reply(
-        "Привет! Бот работает 🚀",
+    /*
+     * Получаем всех активных ботов.
+     * Включая главный.
+     */
+    const botRecords =
+        await getActiveBots();
+
+    /*
+     * Создаём и запускаем каждый экземпляр.
+     */
+    for (const botRecord of botRecords) {
+        const bot =
+            await createBotInstance(
+                botRecord.token,
+                botRecord.id,
+                botRecord.isMain,
+            );
+
+        /*
+         * /start одинаковый для всех ботов.
+         */
+        bot.command(
+            "start",
+            async (ctx) => {
+                if (!ctx.from) {
+                    return;
+                }
+
+                const telegramId =
+                    BigInt(ctx.from.id);
+
+                const user =
+                    await getUserByTelegramId(
+                        telegramId,
+                    );
+
+                if (!user) {
+                    await ctx.reply(
+                        "У тебя нет доступа к боту.",
+                    );
+
+                    return;
+                }
+
+                await ctx.reply(
+                    "Привет! Бот работает 🚀",
+                );
+            },
+        );
+
+        /*
+         * start() не await'им:
+         * каждый бот должен работать
+         * параллельно с остальными.
+         */
+        void bot.start({
+            onStart: () => {
+                console.log(
+                    `Bot started: @${botRecord.username ?? botRecord.telegramBotId}`,
+                );
+            },
+        }).catch((error) => {
+            console.error(
+                `Failed to start bot @${botRecord.username ?? botRecord.telegramBotId}:`,
+                error,
+            );
+        });
+    }
+
+    /*
+     * Scheduler нужен только один
+     * на всё приложение.
+     */
+    startCampaignScheduler();
+
+    console.log(
+        `Started ${botRecords.length} bot(s)`,
     );
-});
+}
 
-initBot()
-    .then(async () => {
-        await initOwners();
-
-        startCampaignScheduler();
-
-        bot.start();
-    })
-    .catch((error) => {
-        console.error(
-            "Failed to start bot:",
-            error,
-        );
-    });
-
-bot.catch((err) => {
+bootstrap().catch((error) => {
     console.error(
-        "Bot error:",
-        err.error,
+        "Failed to start application:",
+        error,
     );
+
+    process.exit(1);
 });

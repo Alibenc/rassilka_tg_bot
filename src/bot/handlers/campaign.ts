@@ -24,10 +24,6 @@ interface PendingAlbum {
     timer: ReturnType<typeof setTimeout>;
 }
 
-const drafts = new Map<number, CampaignDraft>();
-
-const pendingAlbums = new Map<string, PendingAlbum>();
-
 const ALBUM_WAIT_MS = 700;
 
 function addSaveButton() {
@@ -37,40 +33,113 @@ function addSaveButton() {
     );
 }
 
-async function saveAlbum(
-    album: PendingAlbum,
+export function registerCampaignHandlers(
+    bot: Bot,
+    botId: number,
 ) {
-    const draft = drafts.get(album.userId);
+    /*
+     * У каждого экземпляра бота свои черновики
+     * и свои обрабатываемые альбомы.
+     */
+    const drafts = new Map<number, CampaignDraft>();
 
-    if (!draft || draft.waitingForInterval) {
-        return;
+    const pendingAlbums =
+        new Map<string, PendingAlbum>();
+
+    async function saveAlbum(
+        album: PendingAlbum,
+    ) {
+        const draft = drafts.get(album.userId);
+
+        if (!draft || draft.waitingForInterval) {
+            return;
+        }
+
+        draft.messages.push({
+            type: "MEDIA",
+            text: album.caption,
+            media: album.media,
+        });
+
+        await bot.api.sendMessage(
+            album.userId,
+            `Альбом из ${album.media.length} файлов сохранён.`,
+            {
+                reply_markup: addSaveButton(),
+            },
+        );
     }
 
-    draft.messages.push({
-        type: "MEDIA",
-        text: album.caption,
-        media: album.media,
-    });
+    async function finishAlbum(
+        mediaGroupId: string,
+    ) {
+        const album =
+            pendingAlbums.get(mediaGroupId);
 
-    await botInstance.api.sendMessage(
-        album.userId,
-        `Альбом из ${album.media.length} файлов сохранён.`,
-        {
-            reply_markup: addSaveButton(),
-        },
-    );
-}
+        if (!album) {
+            return;
+        }
 
-let botInstance: Bot;
+        pendingAlbums.delete(mediaGroupId);
 
-export function registerCampaignHandlers(bot: Bot) {
-    botInstance = bot;
+        await saveAlbum(album);
+    }
+
+    async function addToAlbum(params: {
+        userId: number;
+        mediaGroupId: string;
+        media: CampaignMedia;
+        caption?: string;
+    }) {
+        const {
+            userId,
+            mediaGroupId,
+            media,
+            caption,
+        } = params;
+
+        const existing =
+            pendingAlbums.get(mediaGroupId);
+
+        if (existing) {
+            existing.media.push(media);
+
+            if (caption && !existing.caption) {
+                existing.caption = caption;
+            }
+
+            clearTimeout(existing.timer);
+
+            existing.timer = setTimeout(() => {
+                void finishAlbum(mediaGroupId);
+            }, ALBUM_WAIT_MS);
+
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            void finishAlbum(mediaGroupId);
+        }, ALBUM_WAIT_MS);
+
+        pendingAlbums.set(mediaGroupId, {
+            userId,
+            mediaGroupId,
+            media: [media],
+            caption,
+            timer,
+        });
+    }
 
     bot.command(
         "create_campaign",
         authMiddleware,
         async (ctx) => {
-            const topics = await getTopicNames();
+            /*
+             * Получаем топики только тех групп,
+             * которые принадлежат этому боту.
+             */
+            const topics =
+                await getTopicNames(botId);
 
             if (topics.length === 0) {
                 await ctx.reply(
@@ -84,12 +153,7 @@ export function registerCampaignHandlers(bot: Bot) {
                 "Выбери топик для рассылки:",
                 {
                     reply_markup:
-                        topicNamesKeyboard(
-                            topics.map(
-                                (topic) =>
-                                    topic.name,
-                            ),
-                        ),
+                        topicNamesKeyboard(topics),
                 },
             );
         },
@@ -100,6 +164,24 @@ export function registerCampaignHandlers(bot: Bot) {
         authMiddleware,
         async (ctx) => {
             const topicName = ctx.match[1];
+
+            /*
+             * Дополнительно проверяем, что такой
+             * топик действительно доступен этому боту.
+             */
+            const availableTopics =
+                await getTopicNames(botId);
+
+            if (
+                !availableTopics.includes(topicName)
+            ) {
+                await ctx.answerCallbackQuery({
+                    text: "Этот топик недоступен.",
+                    show_alert: true,
+                });
+
+                return;
+            }
 
             drafts.set(ctx.from.id, {
                 topicName,
@@ -131,7 +213,8 @@ export function registerCampaignHandlers(bot: Bot) {
                 return;
             }
 
-            const draft = drafts.get(ctx.from.id);
+            const draft =
+                drafts.get(ctx.from.id);
 
             if (!draft) {
                 await next();
@@ -153,8 +236,8 @@ export function registerCampaignHandlers(bot: Bot) {
                 }
 
                 if (
-                    "text" in ctx.message &&
-                    typeof ctx.message.text === "string" &&
+                    typeof ctx.message.text ===
+                    "string" &&
                     ctx.message.text.startsWith("/")
                 ) {
                     await next();
@@ -182,9 +265,7 @@ export function registerCampaignHandlers(bot: Bot) {
                         BigInt(ctx.from.id),
                     );
 
-                if (
-                    !user
-                ) {
+                if (!user) {
                     await ctx.reply(
                         "У тебя нет доступа к боту.",
                     );
@@ -196,6 +277,7 @@ export function registerCampaignHandlers(bot: Bot) {
 
                 const campaign =
                     await createCampaign({
+                        botId,
                         topicName:
                         draft.topicName,
                         messages:
@@ -227,7 +309,8 @@ export function registerCampaignHandlers(bot: Bot) {
              */
             if (
                 "text" in ctx.message &&
-                typeof ctx.message.text === "string" &&
+                typeof ctx.message.text ===
+                "string" &&
                 ctx.message.text.startsWith("/")
             ) {
                 await next();
@@ -257,7 +340,10 @@ export function registerCampaignHandlers(bot: Bot) {
             /*
              * PHOTO
              */
-            if ("photo" in ctx.message && ctx.message.photo) {
+            if (
+                "photo" in ctx.message &&
+                ctx.message.photo
+            ) {
                 const photo =
                     ctx.message.photo.at(-1);
 
@@ -269,7 +355,7 @@ export function registerCampaignHandlers(bot: Bot) {
                     ctx.message.media_group_id;
 
                 /*
-                 * Обычная одиночная фотография.
+                 * Одиночная фотография.
                  */
                 if (!mediaGroupId) {
                     draft.messages.push({
@@ -318,14 +404,18 @@ export function registerCampaignHandlers(bot: Bot) {
             /*
              * VIDEO
              */
-            if ("video" in ctx.message && ctx.message.video) {
-                const video = ctx.message.video;
+            if (
+                "video" in ctx.message &&
+                ctx.message.video
+            ) {
+                const video =
+                    ctx.message.video;
 
                 const mediaGroupId =
                     ctx.message.media_group_id;
 
                 /*
-                 * Обычное одиночное видео.
+                 * Одиночное видео.
                  */
                 if (!mediaGroupId) {
                     draft.messages.push({
@@ -371,10 +461,6 @@ export function registerCampaignHandlers(bot: Bot) {
                 return;
             }
 
-            /*
-             * Остальные типы сообщений
-             * пока не поддерживаем.
-             */
             await ctx.reply(
                 "Поддерживаются только текст, фото, видео и альбомы из фото/видео.",
             );
@@ -385,7 +471,8 @@ export function registerCampaignHandlers(bot: Bot) {
         "campaign:save_messages",
         authMiddleware,
         async (ctx) => {
-            const draft = drafts.get(ctx.from.id);
+            const draft =
+                drafts.get(ctx.from.id);
 
             if (!draft) {
                 await ctx.answerCallbackQuery({
@@ -407,8 +494,7 @@ export function registerCampaignHandlers(bot: Bot) {
 
             /*
              * Если пользователь только что отправил
-             * альбом, даём ему немного времени,
-             * чтобы он успел полностью собраться.
+             * альбом, ждём пока он полностью соберётся.
              */
             const hasPendingAlbum =
                 [...pendingAlbums.values()].some(
@@ -441,64 +527,4 @@ export function registerCampaignHandlers(bot: Bot) {
             );
         },
     );
-}
-
-async function addToAlbum(params: {
-    userId: number;
-    mediaGroupId: string;
-    media: CampaignMedia;
-    caption?: string;
-}) {
-    const {
-        userId,
-        mediaGroupId,
-        media,
-        caption,
-    } = params;
-
-    const existing =
-        pendingAlbums.get(mediaGroupId);
-
-    if (existing) {
-        existing.media.push(media);
-
-        if (caption && !existing.caption) {
-            existing.caption = caption;
-        }
-
-        clearTimeout(existing.timer);
-
-        existing.timer = setTimeout(() => {
-            void finishAlbum(mediaGroupId);
-        }, ALBUM_WAIT_MS);
-
-        return;
-    }
-
-    const timer = setTimeout(() => {
-        void finishAlbum(mediaGroupId);
-    }, ALBUM_WAIT_MS);
-
-    pendingAlbums.set(mediaGroupId, {
-        userId,
-        mediaGroupId,
-        media: [media],
-        caption,
-        timer,
-    });
-}
-
-async function finishAlbum(
-    mediaGroupId: string,
-) {
-    const album =
-        pendingAlbums.get(mediaGroupId);
-
-    if (!album) {
-        return;
-    }
-
-    pendingAlbums.delete(mediaGroupId);
-
-    await saveAlbum(album);
 }

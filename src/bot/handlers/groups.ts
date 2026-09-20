@@ -4,12 +4,16 @@ import { getTopicsBySupergroup } from "../../services/topic.service.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { groupsKeyboard } from "../keyboards/groups.js";
 
-export function registerGroupHandlers(bot: Bot) {
+export function registerGroupHandlers(
+    bot: Bot,
+    botId: number,
+) {
     bot.command(
         "groups",
         authMiddleware,
         async (ctx) => {
-            const groups = await getActiveSupergroups();
+            const groups =
+                await getActiveSupergroups(botId);
 
             if (groups.length === 0) {
                 await ctx.reply(
@@ -29,6 +33,21 @@ export function registerGroupHandlers(bot: Bot) {
         authMiddleware,
         async (ctx) => {
             const groupId = Number(ctx.match[1]);
+
+            const groups =
+                await getActiveSupergroups(botId);
+
+            const group = groups.find(
+                (group) => group.id === groupId,
+            );
+
+            if (!group) {
+                await ctx.answerCallbackQuery({
+                    text: "Группа недоступна.",
+                });
+
+                return;
+            }
 
             const topics =
                 await getTopicsBySupergroup(groupId);

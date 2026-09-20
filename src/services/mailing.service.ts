@@ -1,20 +1,36 @@
-// import { InputMediaPhoto, InputMediaVideo } from "grammy";
-
 import { getTopicsByName } from "./topic.service.js";
-import { bot } from "../bot/index.js";
+import { getRunningBot } from "../bot/bot-registry.js";
+
 import type {
     CampaignMessage,
 } from "./campaign.service.js";
 
 export async function sendToTopic(
+    botId: number,
     topicName: string,
     post: CampaignMessage,
 ) {
-    const topics = await getTopicsByName(topicName);
+    const bot = getRunningBot(botId);
+
+    if (!bot) {
+        throw new Error(
+            `Running bot not found: botId=${botId}`,
+        );
+    }
+
+    /*
+     * Получаем только топики супергрупп,
+     * принадлежащих этому боту.
+     */
+    const topics = await getTopicsByName(
+        botId,
+        topicName,
+    );
 
     for (const topic of topics) {
         try {
-            const chatId = topic.chatId.toString();
+            const chatId =
+                topic.telegramChatId.toString();
 
             if (post.type === "TEXT") {
                 if (!post.text) {
@@ -26,7 +42,7 @@ export async function sendToTopic(
                     post.text,
                     {
                         message_thread_id:
-                        topic.threadId,
+                        topic.telegramThreadId,
                     },
                 );
 
@@ -37,6 +53,9 @@ export async function sendToTopic(
                 continue;
             }
 
+            /*
+             * Один файл.
+             */
             if (post.media.length === 1) {
                 const media = post.media[0];
 
@@ -46,7 +65,7 @@ export async function sendToTopic(
                         media.fileId,
                         {
                             message_thread_id:
-                            topic.threadId,
+                            topic.telegramThreadId,
                             caption:
                                 post.text ||
                                 undefined,
@@ -58,7 +77,7 @@ export async function sendToTopic(
                         media.fileId,
                         {
                             message_thread_id:
-                            topic.threadId,
+                            topic.telegramThreadId,
                             caption:
                                 post.text ||
                                 undefined,
@@ -69,15 +88,21 @@ export async function sendToTopic(
                 continue;
             }
 
+            /*
+             * Альбом.
+             */
             const mediaGroup = post.media.map(
                 (media, index) => {
                     if (media.type === "photo") {
                         return {
                             type: "photo" as const,
                             media: media.fileId,
-                            ...(index === 0 && post.text
+
+                            ...(index === 0 &&
+                            post.text
                                 ? {
-                                    caption: post.text,
+                                    caption:
+                                    post.text,
                                 }
                                 : {}),
                         };
@@ -86,9 +111,12 @@ export async function sendToTopic(
                     return {
                         type: "video" as const,
                         media: media.fileId,
-                        ...(index === 0 && post.text
+
+                        ...(index === 0 &&
+                        post.text
                             ? {
-                                caption: post.text,
+                                caption:
+                                post.text,
                             }
                             : {}),
                     };
@@ -99,12 +127,13 @@ export async function sendToTopic(
                 chatId,
                 mediaGroup,
                 {
-                    message_thread_id: topic.threadId,
+                    message_thread_id:
+                    topic.telegramThreadId,
                 },
             );
         } catch (error) {
             console.error(
-                `Failed to send to ${topic.chatId}:${topic.threadId}`,
+                `Failed to send: botId=${botId}, chat=${topic.telegramChatId}, thread=${topic.telegramThreadId}`,
                 error,
             );
         }

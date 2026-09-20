@@ -5,13 +5,17 @@ import {
     upsertSupergroup,
 } from "../../services/supergroup.service.js";
 
-export function registerChatHandlers(bot: Bot) {
+export function registerChatHandlers(
+    bot: Bot,
+    botId: number,
+) {
     bot.on("my_chat_member", async (ctx) => {
         if (ctx.chat.type !== "supergroup") {
             return;
         }
 
-        const status = ctx.myChatMember.new_chat_member.status;
+        const status =
+            ctx.myChatMember.new_chat_member.status;
 
         const isActive =
             status === "member" ||
@@ -19,6 +23,7 @@ export function registerChatHandlers(bot: Bot) {
 
         if (isActive) {
             await upsertSupergroup({
+                botId,
                 telegramChatId: BigInt(ctx.chat.id),
                 title: ctx.chat.title,
                 username:
@@ -28,18 +33,19 @@ export function registerChatHandlers(bot: Bot) {
             });
 
             console.log(
-                `Supergroup registered: ${ctx.chat.title}`,
+                `Supergroup registered: ${ctx.chat.title} [botId=${botId}]`,
             );
 
             return;
         }
 
         await deactivateSupergroup(
+            botId,
             BigInt(ctx.chat.id),
         );
 
         console.log(
-            `Supergroup deactivated: ${ctx.chat.title}`,
+            `Supergroup deactivated: ${ctx.chat.title} [botId=${botId}]`,
         );
     });
 }

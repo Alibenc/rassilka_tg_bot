@@ -8,6 +8,7 @@ import {
 } from "../db/schema.js";
 
 interface CreateCampaignParams {
+    botId: number;
     topicName: string;
     messages: CampaignMessage[];
     intervalMinutes: number;
@@ -26,6 +27,7 @@ export interface CampaignMessage {
 }
 
 export async function createCampaign({
+                                         botId,
                                          topicName,
                                          messages,
                                          intervalMinutes,
@@ -35,6 +37,7 @@ export async function createCampaign({
         const [campaign] = await tx
             .insert(campaigns)
             .values({
+                botId,
                 topicName,
                 intervalMinutes,
                 status: "ACTIVE",
