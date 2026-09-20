@@ -1,0 +1,1 @@
+ALTER TABLE "campaigns" RENAME COLUMN "interval_seconds" TO "interval_minutes";
